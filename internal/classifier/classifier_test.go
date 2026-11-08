@@ -131,3 +131,26 @@ func TestEveryLabelHasCategory(t *testing.T) {
 		}
 	}
 }
+
+// The request must stay byte-identical to the original map-based encoding.
+func TestJevPayloadUnchanged(t *testing.T) {
+	j := NewJev("http://x", "k", "m1")
+	e := Email{FromDomain: "a.com", SenderInternal: true, Subject: "Hi <b>\x01", Body: "line1\nline2 & \"q\"\x07", Importance: "high", Received: time.Unix(1_700_000_000, 0)}
+	want, err := json.Marshal(map[string]any{
+		"state": map[string]any{
+			"sender_domain": e.FromDomain, "sender_internal": e.SenderInternal, "importance": e.Importance,
+			"received": e.Received.UTC().Format(time.RFC3339), "subject": sanitize(e.Subject), "body": sanitize(e.Body),
+		},
+		"model": j.Model, "questions": jevQuestions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := j.payload(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("payload changed:\n got %s\nwant %s", got, want)
+	}
+}
