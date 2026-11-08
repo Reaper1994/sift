@@ -1,0 +1,11 @@
+# Secrets — never commit
+sift.env
+*.env
+!sift.env.example
+
+# Build output
+/dist/
+/sift
+/sift.exe
+
+.DS_Store

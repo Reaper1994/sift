@@ -1,0 +1,38 @@
+name: Claude Code
+
+# Mention @claude in an issue or PR comment to have Claude answer questions,
+# review code, or push fixes. Also reviews every PR automatically.
+# Requires the ANTHROPIC_API_KEY repository secret.
+# Only code is sent to Anthropic here — never mailbox data.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  claude:
+    # Respond to @claude mentions, and auto-review PRs from this repo only.
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name != 'pull_request' && contains(toJSON(github.event), '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: ${{ github.event_name == 'pull_request' && 'Review this PR. Focus on correctness and on data protection: email content, addresses or mailbox IDs must never be logged, and nothing unredacted may reach the classifier. Run go test ./... before commenting.' || '' }}
