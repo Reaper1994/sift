@@ -69,6 +69,9 @@ func (e *Engine) Run(ctx context.Context, mailboxes []string) Stats {
 	}
 
 	for _, mb := range mailboxes {
+		if ctx.Err() != nil {
+			break // shutting down: don't count every remaining mailbox as failed
+		}
 		msgs, err := e.Mail.ListRecentInbox(ctx, mb, now().Add(-e.Lookback), e.MaxPerRun)
 		if err != nil {
 			e.Log.Error("list inbox failed", "mailbox", hash(mb), "err", err)
