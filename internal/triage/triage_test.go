@@ -3,6 +3,8 @@ package triage
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/Reaper1994/sift/internal/classifier"
 	"github.com/Reaper1994/sift/internal/graph"
+	"github.com/Reaper1994/sift/internal/httpx"
 )
 
 type fakeMail struct {
@@ -21,9 +24,13 @@ type fakeMail struct {
 	flags  map[string]bool
 
 	bodyFetches int
+	listErr     map[string]error // per-mailbox ListRecentInbox failure
 }
 
-func (f *fakeMail) ListRecentInbox(context.Context, string, time.Time, int) ([]graph.Message, error) {
+func (f *fakeMail) ListRecentInbox(_ context.Context, mb string, _ time.Time, _ int) ([]graph.Message, error) {
+	if err := f.listErr[mb]; err != nil {
+		return nil, err
+	}
 	return f.msgs, nil
 }
 func (f *fakeMail) GetBodyText(context.Context, string, string) (string, error) {
@@ -146,5 +153,16 @@ func TestCancelledContextDoesNotCountMailboxesAsFailed(t *testing.T) {
 	st := engine(m, &spyClf{out: classifier.FYI}, &bytes.Buffer{}).Run(ctx, []string{"a", "b", "c"})
 	if st.Seen != 0 || st.Failed != 0 || len(m.tagged) != 0 {
 		t.Fatalf("stats %+v tagged %v", st, m.tagged)
+	}
+}
+
+func TestRejectedSignInsAreCountedSeparately(t *testing.T) {
+	m := &fakeMail{tagged: map[string][]string{}, flags: map[string]bool{}, listErr: map[string]error{
+		"a": fmt.Errorf("%w: run `sift gmail-login`", httpx.ErrAuth),
+		"b": errors.New("connection reset"),
+	}}
+	st := engine(m, &spyClf{out: classifier.FYI}, &bytes.Buffer{}).Run(context.Background(), []string{"a", "b", "c"})
+	if st.Failed != 2 || st.AuthFailed != 1 {
+		t.Fatalf("stats %+v, want Failed=2 AuthFailed=1", st)
 	}
 }

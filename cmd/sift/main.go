@@ -109,6 +109,7 @@ func main() {
 		eng.EnsureCategories(ctx, cfg.Mailboxes)
 	}
 
+	var authWait time.Duration // current back-off while every sign-in is rejected
 	for {
 		start := time.Now()
 		st := eng.Run(ctx, cfg.Mailboxes)
@@ -121,11 +122,24 @@ func main() {
 			}
 			return
 		}
+		wait := cfg.PollInterval
+		if authStalled(st) {
+			// Nothing worked and every failure was a rejected sign-in: polling
+			// every few seconds can't fix that, it only floods the log and the
+			// provider. Back off until a person signs in again.
+			authWait = authBackoff(authWait, cfg.PollInterval)
+			wait = authWait
+			log.Warn("sign-in rejected; backing off",
+				"next_try_in", wait.String(),
+				"fix", "Gmail: run `sift gmail-login`; Microsoft 365: check the client secret. Then restart sift")
+		} else {
+			authWait = 0
+		}
 		select {
 		case <-ctx.Done():
 			log.Info("shutting down")
 			return
-		case <-time.After(cfg.PollInterval):
+		case <-time.After(wait):
 		}
 	}
 }
@@ -156,4 +170,25 @@ func gmailLogin() error {
 	}
 	fmt.Println("Signed in. Saved the token to", path)
 	return nil
+}
+
+const (
+	minAuthBackoff = time.Minute
+	maxAuthBackoff = 30 * time.Minute
+)
+
+// authStalled reports whether a pass made no progress and every failure was a
+// rejected sign-in.
+func authStalled(st triage.Stats) bool {
+	return st.AuthFailed > 0 && st.AuthFailed == st.Failed && st.Seen == 0
+}
+
+// authBackoff returns the next wait while sign-ins are rejected: it starts at
+// a minute (or the poll interval, if longer) and doubles up to 30 minutes.
+func authBackoff(prev, poll time.Duration) time.Duration {
+	next := max(minAuthBackoff, poll)
+	if prev > 0 {
+		next = max(next, min(2*prev, maxAuthBackoff))
+	}
+	return next
 }

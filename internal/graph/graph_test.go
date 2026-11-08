@@ -3,11 +3,14 @@ package graph
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Reaper1994/sift/internal/httpx"
 )
 
 func TestTokenCachingListAndTag(t *testing.T) {
@@ -150,6 +153,24 @@ func TestRetryAfterParsing(t *testing.T) {
 	for in, want := range map[string]time.Duration{"": 0, "x": 0, "-3": 0, "5": 5 * time.Second, "9999": maxRetryAfter} {
 		if got := retryAfter(in); got != want {
 			t.Errorf("retryAfter(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestRejectedClientSecretIsAuthError(t *testing.T) {
+	for _, tc := range []struct {
+		status int
+		auth   bool
+	}{{http.StatusUnauthorized, true}, {http.StatusBadRequest, true}, {http.StatusInternalServerError, false}} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tc.status)
+		}))
+		c := New("tenant", "id", "secret")
+		c.LoginBase, c.GraphBase = srv.URL, srv.URL
+		_, err := c.ListRecentInbox(context.Background(), "a@b.c", time.Now(), 10)
+		srv.Close()
+		if err == nil || errors.Is(err, httpx.ErrAuth) != tc.auth {
+			t.Errorf("status %d: got %v, want ErrAuth=%v", tc.status, err, tc.auth)
 		}
 	}
 }

@@ -117,8 +117,8 @@ func (c *Client) tokenRequest(ctx context.Context, form url.Values) (*tokenRespo
 		}
 		_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&te) // only the code: the rest may echo client details
 		if te.Error == "invalid_grant" {
-			return nil, errors.New("google rejected the sign-in (invalid_grant): run `sift gmail-login` again. " +
-				"If this happens weekly, publish the OAuth app to production (see README)")
+			return nil, fmt.Errorf("%w: google rejected the sign-in (invalid_grant): run `sift gmail-login` again. "+
+				"If this happens weekly, publish the OAuth app to production (see README)", httpx.ErrAuth)
 		}
 		return nil, fmt.Errorf("token request failed: %s %s", resp.Status, te.Error)
 	}
