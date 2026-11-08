@@ -91,7 +91,12 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	}
 	defer httpx.Close(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("token request failed: %s", resp.Status) // body omitted: may echo client details
+		err := fmt.Errorf("token request failed: %s", resp.Status) // body omitted: may echo client details
+		if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized {
+			// Entra answers a wrong, expired or revoked client secret with 400/401.
+			err = fmt.Errorf("%w: %w: check SIFT_CLIENT_ID, SIFT_CLIENT_SECRET and SIFT_TENANT_ID", httpx.ErrAuth, err)
+		}
+		return "", err
 	}
 	var tr struct {
 		AccessToken string `json:"access_token"`

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Reaper1994/sift/internal/classifier"
+	"github.com/Reaper1994/sift/internal/httpx"
 )
 
 // fakeGmail records every request and refuses anything triage shouldn't do.
@@ -230,6 +231,9 @@ func TestExpiredSignInSaysWhatToDo(t *testing.T) {
 	_, err := c.ListRecentInbox(context.Background(), box, time.Now(), 10)
 	if err == nil || !strings.Contains(err.Error(), "sift gmail-login") {
 		t.Fatalf("got %v", err)
+	}
+	if !errors.Is(err, httpx.ErrAuth) {
+		t.Fatalf("expired sign-in should be httpx.ErrAuth, got %v", err)
 	}
 }
 

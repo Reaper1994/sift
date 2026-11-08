@@ -4,10 +4,16 @@
 package httpx
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"time"
 )
+
+// ErrAuth marks errors where the provider rejected Sift's credentials (an
+// expired Google sign-in, a revoked or expired Microsoft client secret).
+// Retrying soon cannot help: a person has to sign in again or fix the config.
+var ErrAuth = errors.New("sign-in rejected")
 
 // transport is shared by every client. The default transport keeps only two
 // idle connections per host, so a run with SIFT_CONCURRENCY=8 would re-dial
