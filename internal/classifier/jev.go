@@ -102,8 +102,8 @@ func (j *Jev) Classify(ctx context.Context, e Email) (Result, error) {
 	return j.Decide(a), nil
 }
 
-// Evaluate sends one request and returns the typed answers.
-func (j *Jev) Evaluate(ctx context.Context, e Email) (JevAnswers, error) {
+// payload builds the request body for one email.
+func (j *Jev) payload(e Email) ([]byte, error) {
 	// Structured state: Jev is built for program state, not chat transcripts.
 	state := map[string]any{
 		"sender_domain":   e.FromDomain,
@@ -113,7 +113,12 @@ func (j *Jev) Evaluate(ctx context.Context, e Email) (JevAnswers, error) {
 		"subject":         sanitize(e.Subject),
 		"body":            sanitize(e.Body),
 	}
-	payload, err := json.Marshal(map[string]any{"state": state, "model": j.Model, "questions": jevQuestions})
+	return json.Marshal(map[string]any{"state": state, "model": j.Model, "questions": jevQuestions})
+}
+
+// Evaluate sends one request and returns the typed answers.
+func (j *Jev) Evaluate(ctx context.Context, e Email) (JevAnswers, error) {
+	payload, err := j.payload(e)
 	if err != nil {
 		return JevAnswers{}, err
 	}
