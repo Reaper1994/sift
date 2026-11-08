@@ -27,6 +27,7 @@ import (
 
 	"github.com/Reaper1994/sift/internal/classifier"
 	"github.com/Reaper1994/sift/internal/graph"
+	"github.com/Reaper1994/sift/internal/httpx"
 )
 
 const (
@@ -70,7 +71,7 @@ func New(clientID, secret, refreshToken string) *Client {
 	return &Client{
 		clientID: clientID, secret: secret, refresh: refreshToken,
 		APIBase: defaultAPI, TokenURL: defaultToken, AuthURL: defaultAuth,
-		HTTP: &http.Client{Timeout: 30 * time.Second}, Concurrency: 4, retryDelay: 500 * time.Millisecond,
+		HTTP: httpx.NewClient(30 * time.Second), Concurrency: 4, retryDelay: 500 * time.Millisecond,
 	}
 }
 
@@ -109,7 +110,7 @@ func (c *Client) tokenRequest(ctx context.Context, form url.Values) (*tokenRespo
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer httpx.Close(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		var te struct {
 			Error string `json:"error"`
@@ -172,7 +173,7 @@ func (c *Client) send(ctx context.Context, method, path, tok string, payload []b
 		}
 		return false, fmt.Errorf("gmail %s %s: %w", method, redactPath(path), err)
 	}
-	defer resp.Body.Close()
+	defer httpx.Close(resp.Body)
 	if resp.StatusCode >= 300 {
 		var ge struct {
 			Error struct {

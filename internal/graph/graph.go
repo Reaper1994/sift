@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Reaper1994/sift/internal/httpx"
 )
 
 const (
@@ -36,7 +38,7 @@ func New(tenant, clientID, secret string) *Client {
 	return &Client{
 		tenant: tenant, clientID: clientID, secret: secret,
 		GraphBase: defaultGraph, LoginBase: defaultLogin,
-		HTTP: &http.Client{Timeout: 30 * time.Second},
+		HTTP: httpx.NewClient(30 * time.Second),
 	}
 }
 
@@ -80,7 +82,7 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer httpx.Close(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("token request failed: %s", resp.Status) // body omitted: may echo client details
 	}
@@ -127,7 +129,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, headers 
 		}
 		return fmt.Errorf("graph %s %s: %w", method, redactPath(path), err)
 	}
-	defer resp.Body.Close()
+	defer httpx.Close(resp.Body)
 	if resp.StatusCode >= 300 {
 		var ge struct {
 			Error struct{ Code string } `json:"error"`
