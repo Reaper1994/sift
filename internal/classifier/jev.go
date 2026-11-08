@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Reaper1994/sift/internal/httpx"
 )
 
 // Jev calls TypeSafe's System One API (POST /v1/systemone).
@@ -34,7 +36,7 @@ type Jev struct {
 func NewJev(baseURL, apiKey, model string) *Jev {
 	return &Jev{
 		BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, Model: model,
-		HTTP:          &http.Client{Timeout: 20 * time.Second},
+		HTTP:          httpx.NewClient(20 * time.Second),
 		MinConfidence: 0.5, PhishingThreshold: 0.7, MaxRetries: 4,
 	}
 }
@@ -102,18 +104,53 @@ func (j *Jev) Classify(ctx context.Context, e Email) (Result, error) {
 	return j.Decide(a), nil
 }
 
+// jevQuestionsJSON is jevQuestions encoded once: it is identical in every request.
+var jevQuestionsJSON = func() json.RawMessage {
+	b, err := json.Marshal(jevQuestions)
+	if err != nil {
+		panic(err) // static data
+	}
+	return b
+}()
+
+// jevRequest is the request body. Fields are declared in alphabetical order so
+// the encoding matches what a map[string]any would produce byte for byte.
+type jevRequest struct {
+	Model     string          `json:"model"`
+	Questions json.RawMessage `json:"questions"`
+	State     jevState        `json:"state"`
+}
+
+// jevState is structured program state: Jev is built for it, not for chat
+// transcripts. Alphabetical field order, as above.
+type jevState struct {
+	Body           string `json:"body"`
+	Importance     string `json:"importance"`
+	Received       string `json:"received"`
+	SenderDomain   string `json:"sender_domain"`
+	SenderInternal bool   `json:"sender_internal"`
+	Subject        string `json:"subject"`
+}
+
+// payload builds the request body for one email.
+func (j *Jev) payload(e Email) ([]byte, error) {
+	return json.Marshal(jevRequest{
+		Model:     j.Model,
+		Questions: jevQuestionsJSON,
+		State: jevState{
+			Body:           sanitize(e.Body),
+			Importance:     e.Importance,
+			Received:       e.Received.UTC().Format(time.RFC3339),
+			SenderDomain:   e.FromDomain,
+			SenderInternal: e.SenderInternal,
+			Subject:        sanitize(e.Subject),
+		},
+	})
+}
+
 // Evaluate sends one request and returns the typed answers.
 func (j *Jev) Evaluate(ctx context.Context, e Email) (JevAnswers, error) {
-	// Structured state: Jev is built for program state, not chat transcripts.
-	state := map[string]any{
-		"sender_domain":   e.FromDomain,
-		"sender_internal": e.SenderInternal,
-		"importance":      e.Importance,
-		"received":        e.Received.UTC().Format(time.RFC3339),
-		"subject":         sanitize(e.Subject),
-		"body":            sanitize(e.Body),
-	}
-	payload, err := json.Marshal(map[string]any{"state": state, "model": j.Model, "questions": jevQuestions})
+	payload, err := j.payload(e)
 	if err != nil {
 		return JevAnswers{}, err
 	}
@@ -183,11 +220,11 @@ func (j *Jev) post(ctx context.Context, payload []byte, out any) error {
 		}
 		retryable := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == 529 || resp.StatusCode >= 500
 		if resp.StatusCode == http.StatusOK {
-			defer resp.Body.Close()
+			defer httpx.Close(resp.Body)
 			return json.NewDecoder(resp.Body).Decode(out)
 		}
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10)) // error bodies may echo input; never log them
-		resp.Body.Close()
+		httpx.Close(resp.Body)
 		if !retryable || attempt >= j.MaxRetries {
 			return fmt.Errorf("jev: %s", resp.Status)
 		}

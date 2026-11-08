@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func fakeJev(t *testing.T, status []int, answers string) (*httptest.Server, *int32, *map[string]any) {
@@ -129,5 +131,39 @@ func TestEveryLabelHasCategory(t *testing.T) {
 		if c, ok := Category[l]; !ok || c.Name[:len(CategoryPrefix)] != CategoryPrefix {
 			t.Errorf("label %s missing/unprefixed category", l)
 		}
+	}
+}
+
+// The request must stay byte-identical to the original map-based encoding.
+func TestJevPayloadUnchanged(t *testing.T) {
+	j := NewJev("http://x", "k", "m1")
+	e := Email{FromDomain: "a.com", SenderInternal: true, Subject: "Hi <b>\x01", Body: "line1\nline2 & \"q\"\x07", Importance: "high", Received: time.Unix(1_700_000_000, 0)}
+	want, err := json.Marshal(map[string]any{
+		"state": map[string]any{
+			"sender_domain": e.FromDomain, "sender_internal": e.SenderInternal, "importance": e.Importance,
+			"received": e.Received.UTC().Format(time.RFC3339), "subject": sanitize(e.Subject), "body": sanitize(e.Body),
+		},
+		"model": j.Model, "questions": jevQuestions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := j.payload(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("payload changed:\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestParseLLMReasonTruncationKeepsValidUTF8(t *testing.T) {
+	reason := strings.Repeat("é", 100) // 200 bytes, 2 per rune
+	res, err := ParseLLM(`{"label":"fyi","reason":"` + reason + `"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(res.Reason) || len(res.Reason) > 120 || len(res.Reason) < 118 {
+		t.Fatalf("reason invalid or wrong length: %d valid=%v", len(res.Reason), utf8.ValidString(res.Reason))
 	}
 }

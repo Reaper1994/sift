@@ -138,3 +138,13 @@ func TestUsesBodyFromListingWithoutFetchingAgain(t *testing.T) {
 		t.Fatalf("classifier saw %+v", clf.seen)
 	}
 }
+
+func TestCancelledContextDoesNotCountMailboxesAsFailed(t *testing.T) {
+	m := &fakeMail{msgs: []graph.Message{msg("1", "a@b.com", "hi")}, tagged: map[string][]string{}, flags: map[string]bool{}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	st := engine(m, &spyClf{out: classifier.FYI}, &bytes.Buffer{}).Run(ctx, []string{"a", "b", "c"})
+	if st.Seen != 0 || st.Failed != 0 || len(m.tagged) != 0 {
+		t.Fatalf("stats %+v tagged %v", st, m.tagged)
+	}
+}

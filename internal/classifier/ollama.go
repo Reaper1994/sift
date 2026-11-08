@@ -8,6 +8,9 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/Reaper1994/sift/internal/httpx"
 )
 
 // Ollama classifies with a self-hosted model. Nothing leaves your network.
@@ -19,7 +22,7 @@ type Ollama struct {
 
 func NewOllama(baseURL, model string) *Ollama {
 	return &Ollama{BaseURL: strings.TrimRight(baseURL, "/"), Model: model,
-		HTTP: &http.Client{Timeout: 120 * time.Second}}
+		HTTP: httpx.NewClient(120 * time.Second)}
 }
 
 func (o *Ollama) Name() string { return "ollama" }
@@ -69,7 +72,7 @@ func (o *Ollama) Classify(ctx context.Context, e Email) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	defer resp.Body.Close()
+	defer httpx.Close(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return Result{}, fmt.Errorf("ollama: %s", resp.Status)
 	}
@@ -96,10 +99,21 @@ func ParseLLM(s string) (Result, error) {
 	for _, ok := range ollamaLabels {
 		if l == ok {
 			if len(r.Reason) > 120 {
-				r.Reason = r.Reason[:120]
+				r.Reason = truncateUTF8(r.Reason, 120)
 			}
 			return Result{Label: l, Confidence: 1, Reason: r.Reason}, nil
 		}
 	}
 	return Result{}, fmt.Errorf("model returned unknown label")
+}
+
+// truncateUTF8 cuts s to at most n bytes without splitting a multi-byte rune.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
