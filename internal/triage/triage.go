@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/Reaper1994/sift/internal/classifier"
 	"github.com/Reaper1994/sift/internal/graph"
+	"github.com/Reaper1994/sift/internal/httpx"
 	"github.com/Reaper1994/sift/internal/redact"
 )
 
@@ -42,7 +44,10 @@ type Engine struct {
 
 type Stats struct {
 	Seen, Skipped, Excluded, Tagged, Failed int
-	ByLabel                                 map[classifier.Label]int
+	// AuthFailed counts the mailboxes (included in Failed) whose provider
+	// rejected Sift's sign-in; retrying soon won't fix those.
+	AuthFailed int
+	ByLabel    map[classifier.Label]int
 }
 
 func (e *Engine) EnsureCategories(ctx context.Context, mailboxes []string) {
@@ -76,6 +81,9 @@ func (e *Engine) Run(ctx context.Context, mailboxes []string) Stats {
 		if err != nil {
 			e.Log.Error("list inbox failed", "mailbox", hash(mb), "err", err)
 			st.Failed++
+			if errors.Is(err, httpx.ErrAuth) {
+				st.AuthFailed++
+			}
 			continue
 		}
 		for _, m := range msgs {
