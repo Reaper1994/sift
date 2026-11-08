@@ -119,6 +119,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any, headers 
 		}
 	}
 	delay := c.retryDelay
+	if delay <= 0 { // zero-value Client: rand.N panics on a non-positive argument
+		delay = 500 * time.Millisecond
+	}
 	for attempt := 1; ; attempt++ {
 		wait, err := c.send(ctx, method, path, tok, payload, headers, out)
 		if wait < 0 || attempt == maxAttempts {
