@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Reaper1994/sift/internal/httpx"
 )
@@ -98,10 +99,21 @@ func ParseLLM(s string) (Result, error) {
 	for _, ok := range ollamaLabels {
 		if l == ok {
 			if len(r.Reason) > 120 {
-				r.Reason = r.Reason[:120]
+				r.Reason = truncateUTF8(r.Reason, 120)
 			}
 			return Result{Label: l, Confidence: 1, Reason: r.Reason}, nil
 		}
 	}
 	return Result{}, fmt.Errorf("model returned unknown label")
+}
+
+// truncateUTF8 cuts s to at most n bytes without splitting a multi-byte rune.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func fakeJev(t *testing.T, status []int, answers string) (*httptest.Server, *int32, *map[string]any) {
@@ -152,5 +154,16 @@ func TestJevPayloadUnchanged(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Fatalf("payload changed:\n got %s\nwant %s", got, want)
+	}
+}
+
+func TestParseLLMReasonTruncationKeepsValidUTF8(t *testing.T) {
+	reason := strings.Repeat("é", 100) // 200 bytes, 2 per rune
+	res, err := ParseLLM(`{"label":"fyi","reason":"` + reason + `"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utf8.ValidString(res.Reason) || len(res.Reason) > 120 || len(res.Reason) < 118 {
+		t.Fatalf("reason invalid or wrong length: %d valid=%v", len(res.Reason), utf8.ValidString(res.Reason))
 	}
 }
