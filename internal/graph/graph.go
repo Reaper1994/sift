@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,12 +24,17 @@ import (
 const (
 	defaultGraph = "https://graph.microsoft.com/v1.0"
 	defaultLogin = "https://login.microsoftonline.com"
+
+	maxAttempts   = 4
+	maxRetryAfter = 30 * time.Second
 )
 
 type Client struct {
 	tenant, clientID, secret string
 	GraphBase, LoginBase     string
 	HTTP                     *http.Client
+
+	retryDelay time.Duration // first wait after a throttled request; doubles each attempt
 
 	mu      sync.Mutex
 	token   string
@@ -38,7 +45,7 @@ func New(tenant, clientID, secret string) *Client {
 	return &Client{
 		tenant: tenant, clientID: clientID, secret: secret,
 		GraphBase: defaultGraph, LoginBase: defaultLogin,
-		HTTP: httpx.NewClient(30 * time.Second),
+		HTTP: httpx.NewClient(30 * time.Second), retryDelay: 500 * time.Millisecond,
 	}
 }
 
@@ -97,25 +104,51 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	return c.token, nil
 }
 
+// do sends a request, retrying when Graph throttles (429) or is briefly
+// unavailable (503/504). Every request Sift makes is safe to repeat: reads, a
+// category PATCH that sets a fixed value, and an idempotent category create.
 func (c *Client) do(ctx context.Context, method, path string, body any, headers map[string]string, out any) error {
 	tok, err := c.accessToken(ctx)
 	if err != nil {
 		return err
 	}
-	var rdr io.Reader
+	var payload []byte
 	if body != nil {
-		b, err := json.Marshal(body)
-		if err != nil {
+		if payload, err = json.Marshal(body); err != nil {
 			return err
 		}
-		rdr = bytes.NewReader(b)
+	}
+	delay := c.retryDelay
+	for attempt := 1; ; attempt++ {
+		wait, err := c.send(ctx, method, path, tok, payload, headers, out)
+		if wait < 0 || attempt == maxAttempts {
+			return err
+		}
+		if wait == 0 {
+			wait = delay + rand.N(delay) // jitter so parallel workers don't retry together
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+		delay *= 2
+	}
+}
+
+// send makes one attempt. A negative wait means the result is final; zero
+// means retry after the default backoff; positive is the server's Retry-After.
+func (c *Client) send(ctx context.Context, method, path, tok string, payload []byte, headers map[string]string, out any) (wait time.Duration, err error) {
+	var rdr io.Reader
+	if payload != nil {
+		rdr = bytes.NewReader(payload)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.GraphBase+path, rdr)
 	if err != nil {
-		return err
+		return -1, err
 	}
 	req.Header.Set("Authorization", "Bearer "+tok)
-	if body != nil {
+	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, v := range headers {
@@ -127,7 +160,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, headers 
 		if errors.As(err, &ue) { // its text holds the full URL: mailbox and message ID
 			err = ue.Err
 		}
-		return fmt.Errorf("graph %s %s: %w", method, redactPath(path), err)
+		return -1, fmt.Errorf("graph %s %s: %w", method, redactPath(path), err)
 	}
 	defer httpx.Close(resp.Body)
 	if resp.StatusCode >= 300 {
@@ -135,12 +168,27 @@ func (c *Client) do(ctx context.Context, method, path string, body any, headers 
 			Error struct{ Code string } `json:"error"`
 		}
 		_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&ge)
-		return fmt.Errorf("graph %s %s: %s %s", method, redactPath(path), resp.Status, ge.Error.Code)
+		err := fmt.Errorf("graph %s %s: %s %s", method, redactPath(path), resp.Status, ge.Error.Code)
+		switch resp.StatusCode {
+		case http.StatusTooManyRequests, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+			return retryAfter(resp.Header.Get("Retry-After")), err
+		}
+		return -1, err
 	}
 	if out != nil {
-		return json.NewDecoder(resp.Body).Decode(out)
+		return -1, json.NewDecoder(resp.Body).Decode(out)
 	}
-	return nil
+	return -1, nil
+}
+
+// retryAfter parses a Retry-After value in seconds, capped at maxRetryAfter.
+// It returns 0 when absent or unusable, so the caller uses its own backoff.
+func retryAfter(v string) time.Duration {
+	secs, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || secs <= 0 {
+		return 0
+	}
+	return min(time.Duration(secs)*time.Second, maxRetryAfter)
 }
 
 // ListRecentInbox returns inbox messages received since `since`, newest first.

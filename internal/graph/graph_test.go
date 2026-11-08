@@ -93,3 +93,63 @@ func TestNetworkErrorsHideIdentifiers(t *testing.T) {
 		}
 	}
 }
+
+func TestThrottledRequestsRetryAndHonourRetryAfter(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/oauth2/v2.0/token") {
+			_, _ = w.Write([]byte(`{"access_token":"tok","expires_in":3600}`))
+			return
+		}
+		hits++
+		switch hits {
+		case 1:
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+		case 2:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			_, _ = w.Write([]byte(`{"value":[]}`))
+		}
+	}))
+	defer srv.Close()
+	c := New("t", "id", "secret")
+	c.GraphBase, c.LoginBase, c.retryDelay = srv.URL, srv.URL, time.Millisecond
+
+	start := time.Now()
+	if _, err := c.ListRecentInbox(context.Background(), "me@x.com", time.Now(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if hits != 3 {
+		t.Fatalf("hits = %d, want 3", hits)
+	}
+	if time.Since(start) < time.Second {
+		t.Errorf("did not wait for Retry-After: %v", time.Since(start))
+	}
+}
+
+func TestClientErrorsAreNotRetried(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/oauth2/v2.0/token") {
+			_, _ = w.Write([]byte(`{"access_token":"tok","expires_in":3600}`))
+			return
+		}
+		hits++
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+	c := New("t", "id", "secret")
+	c.GraphBase, c.LoginBase = srv.URL, srv.URL
+	if _, err := c.ListRecentInbox(context.Background(), "me@x.com", time.Now(), 10); err == nil || hits != 1 {
+		t.Fatalf("err=%v hits=%d", err, hits)
+	}
+}
+
+func TestRetryAfterParsing(t *testing.T) {
+	for in, want := range map[string]time.Duration{"": 0, "x": 0, "-3": 0, "5": 5 * time.Second, "9999": maxRetryAfter} {
+		if got := retryAfter(in); got != want {
+			t.Errorf("retryAfter(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
