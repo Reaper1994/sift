@@ -11,22 +11,28 @@ import (
 // every pattern runs on every input. The optimised Text and Body must produce
 // byte-identical output, which proves the speed-ups cannot let more through.
 var (
-	refEmail    = regexp.MustCompile(`(?i)[a-z0-9._%+\-]+@([a-z0-9.\-]+\.[a-z]{2,})`)
+	refEmail    = regexp.MustCompile(`[\p{L}\p{N}._%+\-]+@([\p{L}\p{N}.\-]+\.\p{L}{2,})`)
 	refURL      = regexp.MustCompile(`(?i)\bhttps?://([^/\s:?#]+)[^\s<>"')\]]*`)
+	refWWW      = regexp.MustCompile(`(?i)(^|[^\w@.\-/:])(www\.[^/\s:?#]+)[^\s<>"')\]]*`)
 	refIBAN     = regexp.MustCompile(`\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,7}(?:\s?[A-Z0-9]{1,4})?\b`)
+	refSSN      = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
+	refDOB      = regexp.MustCompile(`\b(?:\d{1,2}/\d{1,2}/(?:\d{2}|(?:19\d|20[01])\d)|(?:19\d|20[01])\d-\d{2}-\d{2})\b`)
 	refNINO     = regexp.MustCompile(`(?i)\b[A-Z]{2}\s?\d{2}\s?\d{2}\s?\d{2}\s?[A-D]\b`)
 	refSortAcct = regexp.MustCompile(`\b\d{2}-\d{2}-\d{2}\b(?:\D{0,20}\b\d{8}\b)?`)
 	refCardLike = regexp.MustCompile(`\b(?:\d[ \-]?){13,19}\b`)
 	refPhone    = regexp.MustCompile(`(?:\+\d{1,3}[\s\-]?)?(?:\(?\d{2,5}\)?[\s\-]?)\d{3,4}[\s\-]?\d{3,4}\b`)
-	refLongNum  = regexp.MustCompile(`\b\d{8,}\b`)
+	refLongNum  = regexp.MustCompile(`\b\d{7,}\b`)
 	refSpaces   = regexp.MustCompile(`[ \t]{2,}`)
 	refBlank    = regexp.MustCompile(`\n{3,}`)
 )
 
 func refText(s string) string {
+	s = refWWW.ReplaceAllString(s, "$1[link:$2]")
 	s = refURL.ReplaceAllString(s, "[link:$1]")
 	s = refEmail.ReplaceAllString(s, "[email@$1]")
 	s = refIBAN.ReplaceAllString(s, "[iban]")
+	s = refDOB.ReplaceAllString(s, "[date-of-birth]")
+	s = refSSN.ReplaceAllString(s, "[ssn]")
 	s = refNINO.ReplaceAllString(s, "[ni-number]")
 	s = refSortAcct.ReplaceAllString(s, "[bank-details]")
 	s = refCardLike.ReplaceAllStringFunc(s, func(m string) string {
@@ -81,10 +87,10 @@ func refBody(s string, max int) string {
 }
 
 var fragments = []string{
-	"john@acme.co.uk", "a@b", "@", "http://x.example.com/p?q=1", "HTTPS://Evil.COM:99/a", "://", "mailto:x@y.org",
+	"john@acme.co.uk", "a@b", "@", "http://x.example.com/p?q=1", "HTTPS://Evil.COM:99/a", "://", "mailto:x@y.org", "www.Example.com/x?y=1", "WWW.", "a@www.b.com", "https://www.c.com/p", "jürgen@münchen.de",
 	"4111 1111 1111 1111", "4111-1111-1111-1112", "12345678", "1234567", "98765432101", "12-34-56", "12-34-56 acct 12345678",
 	"GB82 WEST 1234 5698 7654 32", "GB82WEST12345698765432", "DE89", "QQ 12 34 56 C", "qq123456c",
-	"+44 20 7946 0958", "(415) 555-2671", "020 7946 0958", "07700 900123", "5", "42", "2026", "2026-11-08",
+	"+44 20 7946 0958", "(415) 555-2671", "020 7946 0958", "07700 900123", "5", "42", "2026", "2026-11-08", "1980-02-01", "01/02/1980", "1/2/80", "123-45-6789", "10:30", "$12.50",
 	" ", "  ", "   ", "\t", "\t\t", " \t ", "\n", "\n\n", "\n\n\n", "\n\n\n\n\n", "\r\n", "> quoted", "\n> q\n", "\nOn Mon, X wrote:\n",
 	"\nOn track\n", "\nFrom: a\n", "\n-----Original Message-----\n", "hello", "Thanks", "é", "日本語", "[ ]", "x",
 }

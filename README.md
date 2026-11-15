@@ -60,7 +60,7 @@ Each pass, for every configured mailbox, Sift:
 
 1. **Lists inbox messages** from the last `SIFT_LOOKBACK` (24h by default) using Microsoft Graph or the Gmail API.
 2. **Skips** anything that already carries a `Sift:` category. This makes runs idempotent; no local database is kept.
-3. **Skips excluded senders** (for example HR or legal). Their mail is never sent to any model.
+3. **Skips excluded senders** (for example HR or legal). Their mail is never sent to any model. The match is on the `From` header, which a sender can forge, so treat the list as a convenience filter, not a security boundary.
 4. **Redacts** the subject and body (see below), drops quoted reply history and truncates the body to `SIFT_MAX_BODY_CHARS`.
 5. **Asks Jev four independent questions** in a single ~100 ms request, as TypeSafe recommends:
    - `category`, a *Choice* between request, meeting, update, newsletter and social
@@ -216,7 +216,7 @@ Open the link it prints, on the same computer, and sign in. Google will warn tha
 
 ### What this access allows
 
-Sift asks for `gmail.modify` because Google has no narrower permission that can both read mail and change labels. That permission would also allow trashing mail. Sift's code only reads messages and adds labels and stars, but **anyone who gets your `sift.env` can use the token against your mailbox**. Keep the file private. To cut off access, remove Sift at <https://myaccount.google.com/permissions>.
+Sift asks for `gmail.modify` because Google has no narrower permission that can both read mail and change labels. That permission would also allow trashing mail and **sending mail as you** (it includes send). Sift's code only reads messages and adds labels and stars, but **anyone who gets your `sift.env` can use the token against your mailbox, including to send mail from your address**. Guard the file like a password: keep it private (`chmod 600`), out of backups and shared folders, and never commit it. To cut off access, remove Sift at <https://myaccount.google.com/permissions>.
 
 ### Labelling your whole inbox
 
@@ -386,7 +386,7 @@ Settings come from environment variables, or from `sift.env` in the working dire
 | `SIFT_GMAIL_REFRESH_TOKEN` | required for gmail | Saved by `sift gmail-login` |
 | `SIFT_MAILBOXES` | **required** | Comma-separated mailboxes this instance triages; one address for gmail |
 | `SIFT_INTERNAL_DOMAINS` | required for m365 | Your domains, e.g. `example.com`; subdomains count as internal |
-| `SIFT_EXCLUDE_SENDERS` | | Domains or addresses never sent to the classifier |
+| `SIFT_EXCLUDE_SENDERS` | | Domains or addresses never sent to the classifier (matched on the `From` header, which can be forged) |
 | `SIFT_BACKEND` | `jev` | `jev` or `ollama` |
 | `TYPESAFE_API_KEY` | required for jev | Jev API key |
 | `SIFT_JEV_MODEL` | `jev-latest` | Pin a version (e.g. `jev-1.13`) for stable behaviour |
@@ -437,7 +437,7 @@ Only **source code** is sent to Anthropic by this workflow. Sift's mailbox data 
 
 ## Development
 
-Requires Go 1.24+.
+Requires Go 1.25+.
 
 ```bash
 go test -race ./...        # unit tests (no network; Graph and Jev are faked)

@@ -34,9 +34,11 @@ type Jev struct {
 }
 
 func NewJev(baseURL, apiKey, model string) *Jev {
+	c := httpx.NewClient(20 * time.Second)
+	c.CheckRedirect = noRedirects
 	return &Jev{
 		BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, Model: model,
-		HTTP:          httpx.NewClient(20 * time.Second),
+		HTTP:          c,
 		MinConfidence: 0.5, PhishingThreshold: 0.7, MaxRetries: 4,
 	}
 }

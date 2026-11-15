@@ -73,7 +73,7 @@ func main() {
 		j.MinConfidence = cfg.JevMinConfidence
 		clf = j
 	case "ollama":
-		clf = classifier.NewOllama(cfg.OllamaURL, cfg.OllamaModel)
+		clf = classifier.NewOllama(cfg.OllamaURL, cfg.OllamaModel, cfg.AllowRemoteOllama)
 	}
 
 	var mail triage.Mail
