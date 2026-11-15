@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
+	"github.com/Reaper1994/sift/internal/config"
 	"github.com/Reaper1994/sift/internal/httpx"
 )
 
@@ -20,10 +23,51 @@ type Ollama struct {
 	HTTP           *http.Client
 }
 
-func NewOllama(baseURL, model string) *Ollama {
+// NewOllama returns a client for the model at baseURL. Unless allowRemote is
+// set (SIFT_ALLOW_REMOTE_OLLAMA), every connection must reach a private
+// address, so DNS changes after startup cannot send mail outside the network.
+func NewOllama(baseURL, model string, allowRemote bool) *Ollama {
 	return &Ollama{BaseURL: strings.TrimRight(baseURL, "/"), Model: model,
-		HTTP: httpx.NewClient(120 * time.Second)}
+		HTTP: newOllamaClient(120*time.Second, allowRemote)}
 }
+
+// newOllamaClient has its own transport: no proxy (it would see the mail), a
+// dialer that checks the resolved IP of every connection, and no redirects.
+func newOllamaClient(timeout time.Duration, allowRemote bool) *http.Client {
+	d := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second, Control: privateOnly(allowRemote)}
+	t := &http.Transport{
+		Proxy:                 nil,
+		DialContext:           d.DialContext,
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   16, // SIFT_CONCURRENCY is capped at 16
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: time.Second,
+	}
+	return &http.Client{Timeout: timeout, Transport: t, CheckRedirect: noRedirects}
+}
+
+// privateOnly returns a net.Dialer Control func that refuses connections to
+// public addresses, using the same rule as config.CheckPrivateURL.
+func privateOnly(allowRemote bool) func(network, address string, _ syscall.RawConn) error {
+	return func(network, address string, _ syscall.RawConn) error {
+		if allowRemote {
+			return nil
+		}
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		if ip := net.ParseIP(host); ip == nil || !config.IsPrivateIP(ip) {
+			return fmt.Errorf("ollama: refusing to connect to public address %s (set SIFT_ALLOW_REMOTE_OLLAMA=true to override)", host)
+		}
+		return nil
+	}
+}
+
+// noRedirects stops a client following redirects: a redirect could send the
+// request body (the email) to another host.
+func noRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 func (o *Ollama) Name() string { return "ollama" }
 

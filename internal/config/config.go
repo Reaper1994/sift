@@ -177,11 +177,17 @@ func CheckPrivateURL(raw string, allowRemote bool) error {
 		ips = addrs
 	}
 	for _, ip := range ips {
-		if !(ip.IsLoopback() || ip.IsPrivate()) {
+		if !IsPrivateIP(ip) {
 			return fmt.Errorf("SIFT_OLLAMA_URL %q resolves to public address %s; refusing (set SIFT_ALLOW_REMOTE_OLLAMA=true to override)", raw, ip)
 		}
 	}
 	return nil
+}
+
+// IsPrivateIP reports whether ip is a loopback or private-network address:
+// the addresses a self-hosted model may live on.
+func IsPrivateIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 func envOr(k, def string) string {

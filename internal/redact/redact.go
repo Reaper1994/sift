@@ -11,26 +11,33 @@ import (
 )
 
 var (
-	reEmail    = regexp.MustCompile(`(?i)[a-z0-9._%+\-]+@([a-z0-9.\-]+\.[a-z]{2,})`)
+	reEmail    = regexp.MustCompile(`[\p{L}\p{N}._%+\-]+@([\p{L}\p{N}.\-]+\.\p{L}{2,})`)
 	reURL      = regexp.MustCompile(`(?i)\bhttps?://([^/\s:?#]+)[^\s<>"')\]]*`)
+	reWWW      = regexp.MustCompile(`(?i)(^|[^\w@.\-/:])(www\.[^/\s:?#]+)[^\s<>"')\]]*`) // not inside an address or URL
 	reIBAN     = regexp.MustCompile(`\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,7}(?:\s?[A-Z0-9]{1,4})?\b`)
+	reSSN      = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
 	reNINO     = regexp.MustCompile(`(?i)\b[A-Z]{2}\s?\d{2}\s?\d{2}\s?\d{2}\s?[A-D]\b`) // over-matches on purpose
 	reSortAcct = regexp.MustCompile(`\b\d{2}-\d{2}-\d{2}\b(?:\D{0,20}\b\d{8}\b)?`)
 	reCardLike = regexp.MustCompile(`\b(?:\d[ \-]?){13,19}\b`)
 	rePhone    = regexp.MustCompile(`(?:\+\d{1,3}[\s\-]?)?(?:\(?\d{2,5}\)?[\s\-]?)\d{3,4}[\s\-]?\d{3,4}\b`)
-	reLongNum  = regexp.MustCompile(`\b\d{8,}\b`) // account / policy / reference numbers
+	reLongNum  = regexp.MustCompile(`\b\d{7,}\b`) // account / policy / reference numbers
+	// Dates of birth. Four-digit years stop at 2019 so meeting dates survive.
+	reDOB = regexp.MustCompile(`\b(?:\d{1,2}/\d{1,2}/(?:\d{2}|(?:19\d|20[01])\d)|(?:19\d|20[01])\d-\d{2}-\d{2})\b`)
 )
 
 // Text redacts identifiers but keeps the domain of links and addresses, which
 // is a useful phishing signal (e.g. "paypa1-secure.com").
 //
 // Each pattern is only run when the text could possibly contain a match: an
-// address needs '@', a link needs "://", and the numeric patterns need a
+// address needs '@', a link needs "://" or "www.", and the numeric patterns need a
 // minimum number of digits. The gates are necessary conditions of the regexps,
 // so the output is identical to running every pattern unconditionally; they
 // only skip work (replacements never add digits, so counting once is safe).
 func Text(s string) string {
 	digits := countDigits(s)
+	if hasWWW(s) { // before reURL, so its output is not matched again
+		s = reWWW.ReplaceAllString(s, "$1[link:$2]")
+	}
 	if strings.Contains(s, "://") {
 		s = reURL.ReplaceAllString(s, "[link:$1]")
 	}
@@ -39,6 +46,12 @@ func Text(s string) string {
 	}
 	if digits >= 2 { // IBAN: two check digits
 		s = reIBAN.ReplaceAllString(s, "[iban]")
+	}
+	if digits >= 4 { // date of birth: at least d/m/yy
+		s = reDOB.ReplaceAllString(s, "[date-of-birth]")
+	}
+	if digits >= 9 {
+		s = reSSN.ReplaceAllString(s, "[ssn]")
 	}
 	if digits >= 6 { // NINO and sort code: six digits
 		s = reNINO.ReplaceAllString(s, "[ni-number]")
@@ -52,11 +65,23 @@ func Text(s string) string {
 			return m
 		})
 	}
-	if digits >= 8 {
+	if digits >= 7 {
 		s = reLongNum.ReplaceAllString(s, "[number]")
+	}
+	if digits >= 8 {
 		s = rePhone.ReplaceAllString(s, "[phone]")
 	}
 	return s
+}
+
+// hasWWW reports whether s contains "www." in any letter case.
+func hasWWW(s string) bool {
+	for i := 0; i+4 <= len(s); i++ {
+		if s[i]|0x20 == 'w' && s[i+1]|0x20 == 'w' && s[i+2]|0x20 == 'w' && s[i+3] == '.' {
+			return true
+		}
+	}
+	return false
 }
 
 // countDigits counts ASCII digits, the only runes \d matches in RE2.

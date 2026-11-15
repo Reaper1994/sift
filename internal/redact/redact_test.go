@@ -55,3 +55,48 @@ func TestDomain(t *testing.T) {
 		t.Fatal("Domain broken")
 	}
 }
+
+func TestTextRedactsNewIdentifiers(t *testing.T) {
+	for _, tc := range []struct{ in, leak, want string }{
+		{"SSN 123-45-6789 on file", "123-45-6789", "[ssn]"},
+		{"born 01/02/1980.", "01/02/1980", "[date-of-birth]"},
+		{"DOB 1/2/80", "1/2/80", "[date-of-birth]"},
+		{"DOB: 1980-02-01", "1980-02-01", "[date-of-birth]"},
+		{"see www.evil-login.example.com/reset?u=john now", "reset?u=john", "[link:www.evil-login.example.com]"},
+		{"(WWW.Example.com/a)", "/a", "[link:WWW.Example.com]"},
+		{"mail jürgen.müller@bücher.de today", "jürgen", "[email@bücher.de]"},
+		{"write to 山田@例え.jp", "山田", "[email@例え.jp]"},
+		{"account 1234567 please", "1234567", "[number]"},
+		{"account 12345678 please", "12345678", "[number]"},
+	} {
+		out := Text(tc.in)
+		if strings.Contains(out, tc.leak) {
+			t.Errorf("Text(%q) leaked %q: %s", tc.in, tc.leak, out)
+		}
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("Text(%q) = %q, want %q", tc.in, out, tc.want)
+		}
+	}
+}
+
+func TestTextKeepsOrdinaryText(t *testing.T) {
+	for _, in := range []string{
+		"Meeting at 10:30 or 14:45 tomorrow.",
+		"Price is $12.50, or £1,299.99 for 12 months.",
+		"Order 123456 shipped; room 4-12; version 1.25.3.",
+		"Review due 2026-11-20 and 20/11/2026.",
+		"Half of 3/4 is 3/8.",
+		"Email a@www.example.com about https://www.example.com/x",
+	} {
+		out := Text(in)
+		if strings.Contains(out, "[ssn]") || strings.Contains(out, "[date-of-birth]") || strings.Contains(out, "[number]") || strings.Contains(out, "[phone]") {
+			t.Errorf("over-redacted %q: %q", in, out)
+		}
+	}
+	if got := Text("Email a@www.example.com"); got != "Email [email@www.example.com]" {
+		t.Errorf("www inside an address: %q", got)
+	}
+	if got := Text("go to https://www.example.com/x"); got != "go to [link:www.example.com]" {
+		t.Errorf("www inside a URL: %q", got)
+	}
+}

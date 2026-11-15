@@ -155,15 +155,19 @@ func (e *Engine) one(ctx context.Context, mb string, m graph.Message) (classifie
 
 	cats := append(append([]string{}, m.Categories...), classifier.Category[res.Label].Name)
 	flag := e.Flag && res.Label.NeedsAttention()
+	attrs := []any{"label", res.Label, "confidence", round(res.Confidence), "flag", flag}
+	if e.Classifier.Name() != "ollama" { // an LLM's free-text reason can quote the email
+		attrs = append(attrs, "reason", res.Reason)
+	}
 	if e.DryRun {
-		log.Info("dry-run", "label", res.Label, "confidence", round(res.Confidence), "flag", flag, "reason", res.Reason)
+		log.Info("dry-run", attrs...)
 		return res.Label, nil
 	}
 	if err := e.Mail.Tag(ctx, mb, m.ID, cats, flag); err != nil {
 		log.Error("tag failed", "err", err)
 		return "", err
 	}
-	log.Info("tagged", "label", res.Label, "confidence", round(res.Confidence), "flag", flag, "reason", res.Reason)
+	log.Info("tagged", attrs...)
 	return res.Label, nil
 }
 
